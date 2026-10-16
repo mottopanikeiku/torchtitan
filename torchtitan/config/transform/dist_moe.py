@@ -106,12 +106,25 @@ class DistMoeTransform(ModelConfigTransform):
             FPROP/DGRAD grouped-GEMM schedule. ``None`` uses production defaults.
         block_scaled_config: MXFP8 kernel policy. ``None`` selects the annex
             defaults when ``expert_precision`` is ``"mxfp8"``.
+        inference: (MXFP8 only) Prepare expert weights for the generator's
+            fused SwiGLU Mega inference kernel:
+
+            - W13 and W2 are quantized with 1x32 blocks and FPROP scales only,
+              instead of 32x32 blocks with FPROP and DGRAD scales
+
+            - W13's gate/up rows are interleaved and the kernel fuses SwiGLU
+              with the W13 GEMM instead of running it in a separate kernel.
+
+            Requires ``expert_precision="mxfp8"`` and
+            ``block_scaled_config.pipeline="mega"``. Apply it only to a
+            generator model, whose ``DistMoeRuntime`` sets ``inference=True``.
     """
 
     expert_precision: Literal["bf16", "mxfp8"] = "bf16"
     inplace_wgrad_accum: bool = True
     bf16_grouped_gemm_preset: dist_moe.Bf16GroupedGemmPreset | None = None
     block_scaled_config: dist_moe.BlockScaledConfig | None = None
+    inference: bool = False
 
     def __post_init__(self) -> None:
         if self.expert_precision == "bf16":
@@ -119,6 +132,8 @@ class DistMoeTransform(ModelConfigTransform):
                 raise ValueError(
                     "block_scaled_config requires expert_precision='mxfp8'"
                 )
+            if self.inference:
+                raise ValueError("inference requires expert_precision='mxfp8'")
         elif self.expert_precision == "mxfp8":
             if self.bf16_grouped_gemm_preset is not None:
                 raise ValueError(
@@ -150,4 +165,5 @@ class DistMoeTransform(ModelConfigTransform):
             block_scaled_config=(
                 self.block_scaled_config or dist_moe.BlockScaledConfig()
             ),
+            inference=self.inference,
         )
